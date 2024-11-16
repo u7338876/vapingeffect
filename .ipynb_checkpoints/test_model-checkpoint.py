@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split, GridSearchCV
@@ -151,6 +152,23 @@ def knn_samples_rebalanced(X, y, n_samples, threshold=0.2, random_state=42):
     
     return np.array(X_full), np.array(y_full)
 
+def build_lr(X_train, X_test, y_train, y_test):
+    # Initialize the Linear Regression model
+    model = LinearRegression()
+    
+    # Fit the model to the training data
+    model.fit(X_train, y_train)
+    
+    # Make predictions on the test set
+    y_pred = model.predict(X_test)
+    
+    # Evaluate the model
+    lr_mape = mape(y_test, y_pred)
+
+    print("Test MAPE for Linear Regression Model:", lr_mape)
+    
+    return model, lr_mape
+
 def build_no_bootstrap(X_train, X_test, y_train, y_test, cv=5):    
     # Define the RandomForestRegressor model with bootstrap disabled
     rf_model_no_bootstrap = RandomForestRegressor(random_state=42, bootstrap=False)
@@ -295,39 +313,77 @@ if __name__ == "__main__":
     X_reb = pd.DataFrame(X_reb, columns=columns)
 
     # Build Models
+    print("Building Linear Regression Model with no Upsampling")
+    lr_model, lr_test_mape = build_lr(X_train, X_test, y_flat, y_test)
+    print("")
+    
+    print("Building Linear Regression Model with Simple Duplication")
+    lr_sim_model, lr_sim_test_mape = build_lr(X_sim, X_test, y_sim, y_test)
+    print("")
+
+    print("Building Linear Regression Model with KNN Upsampling")
+    lr_knn_model, lr_knn_test_mape = build_lr(X_knn, X_test, y_knn, y_test)
+    print("")
+
+    print("Building Linear Regression with Rebalanced KNN Upsampling")
+    lr_reb_model, lr_reb_test_mape = build_lr(X_reb, X_test, y_reb, y_test)
+    print("")
+
+    print("Building No Bootstrap Model with no Upsampling")
+    no_bootstrap_model, no_bootstrap_test_mape = build_no_bootstrap(X_train, X_test, y_flat, y_test)
+    print("")
+    
     print("Building No Bootstrap Model with Simple Duplication")
     no_bootstrap_sim_model, no_bootstrap_sim_test_mape = build_no_bootstrap(X_sim, X_test, y_sim, y_test, cv=5)
-    print("")
-
-    print("Building Bootstrap Model with Simple Duplication")
-    bootstrap_sim_model, bootstrap_sim_test_mape = build_bootstrap(X_sim, X_test, y_sim, y_test, cv=5)
-    print("")
-
-    print("Building XGBoost Model with Simple Duplication")
-    xgboost_sim_model, xgboost_sim_test_mape = build_xgboost(X_sim, X_test, y_sim, y_test, cv=5)
     print("")
 
     print("Building No Bootstrap Model with KNN Upsampling")
     no_bootstrap_knn_model, no_bootstrap_knn_test_mape = build_no_bootstrap(X_knn, X_test, y_knn, y_test, cv=5)
     print("")
 
-    print("Building Bootstrap Model with KNN Upsampling")
-    bootstrap_knn_model, bootstrap_knn_test_mape = build_bootstrap(X_knn, X_test, y_knn, y_test, cv=5)
-    print("")
-
-    print("Building XGBoost Model with KNN Upsampling")
-    xgboost_knn_model, xgboost_knn_test_mape = build_xgboost(X_knn, X_test, y_knn, y_test, cv=5)
-    print("")
-    
     print("Building No Bootstrap Model with Rebalanced KNN Upsampling")
     no_bootstrap_reb_model, no_bootstrap_reb_test_mape = build_no_bootstrap(X_reb, X_test, y_reb, y_test, cv=5)
+    print("")
+
+    print("Building Bootstrap Model with no Upsampling")
+    bootstrap_model, bootstrap_test_mape = build_bootstrap(X_train, X_test, y_flat, y_test)
+    print("")
+    
+    print("Building Bootstrap Model with Simple Duplication")
+    bootstrap_sim_model, bootstrap_sim_test_mape = build_bootstrap(X_sim, X_test, y_sim, y_test, cv=5)
+    print("")
+
+    print("Building Bootstrap Model with KNN Upsampling")
+    bootstrap_knn_model, bootstrap_knn_test_mape = build_bootstrap(X_knn, X_test, y_knn, y_test, cv=5)
     print("")
 
     print("Building Bootstrap Model with Rebalanced KNN Upsampling")
     bootstrap_reb_model, bootstrap_reb_test_mape = build_bootstrap(X_reb, X_test, y_reb, y_test, cv=5)
     print("")
 
+    print("Building XGBoost Model with no Upsampling")
+    xgboost_model, xgboost_test_mape = build_xgboost(X_train, X_test, y_flat, y_test)
+    print("")
+    
+    print("Building XGBoost Model with Simple Duplication")
+    xgboost_sim_model, xgboost_sim_test_mape = build_xgboost(X_sim, X_test, y_sim, y_test, cv=5)
+    print("")
+
+    print("Building XGBoost Model with KNN Upsampling")
+    xgboost_knn_model, xgboost_knn_test_mape = build_xgboost(X_knn, X_test, y_knn, y_test, cv=5)
+    print("")
+    
     print("Building XGBoost Model with Rebalanced KNN Upsampling")
     xgboost_reb_model, xgboost_reb_test_mape = build_xgboost(X_reb, X_test, y_reb, y_test, cv=5)
     print("")
+
+    # Row is model type
+    summary = pd.DataFrame([[lr_test_mape, lr_sim_test_mape, lr_knn_test_mape, lr_reb_test_mape],
+                           [no_bootstrap_test_mape, no_bootstrap_sim_test_mape, no_bootstrap_knn_test_mape, no_bootstrap_reb_test_mape],
+                           [bootstrap_test_mape, bootstrap_sim_test_mape, bootstrap_knn_test_mape, bootstrap_reb_test_mape],
+                           [xgboost_test_mape, xgboost_sim_test_mape, xgboost_knn_test_mape, xgboost_reb_test_mape]],
+                          index = ['LinearRegression', 'RF No Bootstrap', 'RF Bootstrap', 'XGBoost'],
+                          columns = ['No Upsampling', 'Simple Duplication', 'KNN', 'Rebalanced KNN'])
+    print("MAPE Summary Table")
+    print(summary)
     
