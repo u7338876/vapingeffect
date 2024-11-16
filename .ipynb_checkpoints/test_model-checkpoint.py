@@ -81,7 +81,7 @@ def simple_duplicate(X, y, n_samples=200, random_state=None, noise_std=0.01):
     return X_res, y_res
 
 # Function to generate synthetic samples
-def generate_synthetic_samples(X, y, n_samples, random_state=42):
+def knn_samples(X, y, n_samples, random_state=42):
     np.random.seed(random_state)
     nn = NearestNeighbors(n_neighbors=5)
     nn.fit(X)
@@ -104,7 +104,7 @@ def generate_synthetic_samples(X, y, n_samples, random_state=42):
     
     return np.array(synthetic_X), np.array(synthetic_y)
 
-def generate_synthetic_samples_imbalanced(X, y, n_samples, threshold=0.2, random_state=42):
+def knn_samples_rebalanced(X, y, n_samples, threshold=0.2, random_state=42):
     np.random.seed(random_state)
     nn = NearestNeighbors(n_neighbors=5)
     nn.fit(X)
@@ -138,100 +138,189 @@ def generate_synthetic_samples_imbalanced(X, y, n_samples, threshold=0.2, random
         synthetic_X.append(new_sample_X)
         synthetic_y.append(new_sample_y)
 
-    return np.array(synthetic_X), np.array(synthetic_y)
+    # Stack the original and synthetic data
+    X_full = np.vstack([X_train.values, synthetic_X])
+    y_full = np.hstack([y_flat, synthetic_y])
+    
+    return np.array(X_full), np.array(y_full)
 
-def build_model(X_train, X_test, y_train, y_test, cv=5):    
-        # Define the RandomForestRegressor model with bootstrap disabled
+def build_no_bootstrap(X_train, X_test, y_train, y_test, cv=5):    
+    # Define the RandomForestRegressor model with bootstrap disabled
     rf_model_no_bootstrap = RandomForestRegressor(random_state=42, bootstrap=False)
-
+    
     # Define the parameter grid to search over
     param_grid_no_bootstrap = {
         'n_estimators': [100, 200, 300],    # Number of trees in the forest
         'max_depth': [3, 5, 10],            # Maximum depth of the tree
-        'min_samples_leaf': [1, 2, 4],      # Minimum samples required at a leaf node
+        'min_samples_leaf': [1, 2, 4],      # Minimum number of samples required to be at a leaf node
     }
-
+    
     # Define the MAPE scorer (using Mean Absolute Percentage Error)
     mape_scorer = make_scorer(mape, greater_is_better=False)
-
-    # Convert y_train to a 1D array using NumPy's ravel()
-    y_train_1d = np.ravel(y_train)
-
-    # Setup GridSearchCV to perform cross-validation
-    grid_search_rf_no_bootstrap = GridSearchCV(
-        estimator=rf_model_no_bootstrap, 
-        param_grid=param_grid_no_bootstrap, 
-        scoring=mape_scorer, 
-        cv=cv, 
-        verbose=1, 
-        n_jobs=-1
-    )
-
-    # Fit the grid search to the training data
-    grid_search_rf_no_bootstrap.fit(X_train, y_train_1d)
-
-    # Get the best hyperparameters and best score from grid search
-    best_rf_model_no_bootstrap = grid_search_rf_no_bootstrap.best_estimator_
-    best_params_rf_no_bootstrap = grid_search_rf_no_bootstrap.best_params_
-    best_cv_mape_no_bootstrap = -grid_search_rf_no_bootstrap.best_score_
-
-    print("Best Parameters for Random Forest (No Bootstrap):", best_params_rf_no_bootstrap)
-    print("Best CV MAPE for Random Forest (No Bootstrap):", best_cv_mape_no_bootstrap)
-
-    # Perform cross-validation with the best model to get average MAPE
-    cv_mape_scores_no_bootstrap = cross_val_score(
-        best_rf_model_no_bootstrap, 
-        X_train, 
-        y_train_1d, 
-        scoring=mape_scorer, 
-        cv=cv, 
-        n_jobs=-1
-    )
-    avg_cv_mape_no_bootstrap = -cv_mape_scores_no_bootstrap.mean()
-
-    print(f"Average CV MAPE for Random Forest (No Bootstrap): {avg_cv_mape_no_bootstrap}")
-
-    # Train the final model using the best parameters
-    best_rf_model_no_bootstrap.fit(X_train, y_train_1d)
-
-    # Evaluate on the test set
-    y_pred_rf_no_bootstrap = best_rf_model_no_bootstrap.predict(X_test)
-    test_mape_rf_no_bootstrap = mape(y_test, y_pred_rf_no_bootstrap)
     
-    print("Test MAPE for Random Forest (No Bootstrap):", test_mape_rf_no_bootstrap)
+    # Setup GridSearchCV to perform cross-validation
+    grid_search_rf_no_bootstrap = GridSearchCV(estimator=rf_model_no_bootstrap, param_grid=param_grid_no_bootstrap, 
+                                               scoring=mape_scorer, cv=5, verbose=1, n_jobs=-1)
+    
+    # Fit the grid search to the duplicated training data
+    grid_search_rf_no_bootstrap.fit(X_train, y_train)
+    
+    # Best hyperparameters from grid search
+    print("Best Parameters for Random Forest (No Bootstrap):", grid_search_rf_no_bootstrap.best_params_)
+    
+    # Best MAPE score from cross-validation
+    print("Best MAPE for Random Forest (No Bootstrap):", -grid_search_rf_no_bootstrap.best_score_)
+    
+    # Train a final model using the best parameters
+    best_no_bootstrap_model = grid_search_rf_no_bootstrap.best_estimator_
+    
+    # Evaluate on the test set
+    y_pred_rf_no_bootstrap = best_no_bootstrap_model.predict(X_test)
+    
+    # Calculate the test MAPE
+    test_mape = mape(y_test, y_pred_rf_no_bootstrap)
+    print("Test MAPE for Random Forest (No Bootstrap):", test_mape)
 
-    return best_rf_model_no_bootstrap, avg_cv_mape_no_bootstrap, test_mape_rf_no_bootstrap
+    return best_no_bootstrap_model, test_mape
 
+def build_bootstrap(X_train, X_test, y_train, y_test, cv=5):    
+    # Define the RandomForestRegressor model
+    rf_model = RandomForestRegressor(random_state=42, bootstrap=True)
+    
+    # Define the parameter grid to search over
+    param_grid = {
+        'n_estimators': [100, 200, 300],    # Number of trees in the forest
+        'max_depth': [5, 10, 20],            # Maximum depth of the tree
+        'min_samples_leaf': [1, 5, 10],      # Minimum number of samples required to be at a leaf node
+        'max_samples': [0.5, 0.7, 1.0],     # Maximum number of samples to draw from the data with replacement
+    }
+    
+    # Define the MAPE scorer (using Mean Absolute Percentage Error)
+    mape_scorer = make_scorer(mape, greater_is_better=False)
+    
+    # Setup GridSearchCV to perform cross-validation
+    grid_search_rf = GridSearchCV(estimator=rf_model, param_grid=param_grid, 
+                                  scoring=mape_scorer, cv=5, verbose=1, n_jobs=-1)
+    
+    # Fit the grid search to the duplicated training data
+    grid_search_rf.fit(X_train, y_train)
+    
+    # Best hyperparameters from grid search
+    print("Best Parameters for Random Forest:", grid_search_rf.best_params_)
+    
+    # Best MAPE score from cross-validation
+    print("Best MAPE for Random Forest:", -grid_search_rf.best_score_)
+    
+    # Train a final model using the best parameters
+    best_bootstrap_model = grid_search_rf.best_estimator_
+    
+    # Evaluate on the test set
+    y_pred_rf = best_bootstrap_model.predict(X_test)
+    
+    # Calculate the test MAPE
+    test_mape = mape(y_test, y_pred_rf)
+    print("Test MAPE for Random Forest:", test_mape)
+
+    return best_bootstrap_model, test_mape
+
+def build_xgboost(X_train, X_test, y_train, y_test, cv=5):
+    # Define the XGBoost model
+    xgb_model = XGBRegressor(objective='reg:squarederror', random_state=42)
+    
+    # Define the parameter grid to search over
+    param_grid = {
+        'n_estimators': [100, 200, 300],   # Number of trees
+        'max_depth': [5, 10, 20],            # Depth of the trees
+        'min_child_weight': [1, 5, 10],     # Minimum sum of instance weight (hessian)
+        'reg_lambda': [0.01, 0.1, 1, 10],  # L2 regularization term (lambda)
+        'reg_alpha': [0.01, 0.1, 1, 10],      # L1 regularization term (alpha)
+    }
+    
+    # Define the MAPE scorer (as we are optimizing based on Mean Absolute Percentage Error)
+    mape_scorer = make_scorer(mape, greater_is_better=False)
+    
+    # Setup GridSearchCV to perform cross-validation
+    grid_search = GridSearchCV(estimator=xgb_model, param_grid=param_grid, 
+                               scoring=mape_scorer, cv=5, verbose=1, n_jobs=-1)
+    
+    # Fit the grid search to the duplicated training data
+    grid_search.fit(X_train, y_train)
+    
+    # Best hyperparameters from grid search
+    print("Best Parameters:", grid_search.best_params_)
+    
+    # Best MAPE score from cross-validation
+    print("Best MAPE:", -grid_search.best_score_)
+    
+    # Train a final model using the best parameters
+    best_xgb_model = grid_search.best_estimator_
+    
+    # Evaluate on the test set
+    y_pred = best_xgb_model.predict(X_test)
+    
+    # Calculate the test MAPE
+    test_mape = mape(y_test, y_pred)
+    print("Test MAPE:", test_mape)
+
+    return best_xgb_model, test_mape
 
 if __name__ == "__main__":
+    # Prepare DataFrame
+    print("Preparing DataFrame")
     df_vape = prepare_df()
-    X = df_vape[['tax_increase', 'outlet_reduction', 'dec_smoking_prevalence', 
-              'dec_tobacco_supply', 'dec_smoking_uptake', 'average_age', 
-              'gender_idx', 'ethnicity_idx']]
-    y = df_vape[['qalys_pc']]
-    
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.5, random_state=42)
-    
-    # Ensure that y is a 1D array for compatibility
-    y_flat = y_train.values.flatten()
-
-    # Generate synthetic samples with fixed random state
-    X_res, y_res = generate_synthetic_samples_imbalanced(X_train.values, y_flat, n_samples=200, random_state=42)
-    
-    # Stack the original and synthetic data
-    X_full = np.vstack([X_train.values, X_res])
-    y_full = np.hstack([y_flat, y_res])
-    
-    # Convert to DataFrame for easier handling
-    df_resampled_imb = pd.DataFrame(X_full, columns=X.columns)
-    df_resampled_imb['qalys_pc'] = y_full
-
     columns = ['tax_increase', 'outlet_reduction', 'dec_smoking_prevalence', 
               'dec_tobacco_supply', 'dec_smoking_uptake', 'average_age', 
               'gender_idx', 'ethnicity_idx']
+    X = df_vape[columns]
+    y = df_vape[['qalys_pc']]
     
-    X_resampled_imb = df_resampled_imb[columns]
-    y_resampled_imb = df_resampled_imb[['qalys_pc']]
+    # Train Test Split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+    y_flat = y_train.values.flatten() # Ensure that y is a 1D array for compatibility
+    
+    # Generate synthetic samples
+    print("Generating Synthetic Samples")
+    X_sim, y_sim = simple_duplicate(X_train.values, y_flat, n_samples=200, random_state=42)
+    X_sim = pd.DataFrame(X_sim, columns=columns)
+    X_knn, y_knn = knn_samples(X_train.values, y_flat, n_samples=200, random_state=42)
+    X_knn = pd.DataFrame(X_knn, columns=columns)
+    X_reb, y_reb = knn_samples_rebalanced(X_train.values, y_flat, n_samples=200, random_state=42)
+    X_reb = pd.DataFrame(X_reb, columns=columns)
 
-    best_rf_model, avg_cv_mape, test_mape_rf = build_model(X_resampled_imb, X_test, y_resampled_imb, y_test, cv=5)
+    # Build Models
+    print("Building No Bootstrap Model with Simple Duplication")
+    no_bootstrap_sim_model, no_bootstrap_sim_test_mape = build_no_bootstrap(X_sim, X_test, y_sim, y_test, cv=5)
+    print("")
+
+    print("Building Bootstrap Model with Simple Duplication")
+    bootstrap_sim_model, bootstrap_sim_test_mape = build_bootstrap(X_sim, X_test, y_sim, y_test, cv=5)
+    print("")
+
+    print("Building XGBoost Model with Simple Duplication")
+    xgboost_sim_model, xgboost_sim_test_mape = build_xgboost(X_sim, X_test, y_sim, y_test, cv=5)
+    print("")
+
+    print("Building No Bootstrap Model with KNN Upsampling")
+    no_bootstrap_knn_model, no_bootstrap_knn_test_mape = build_no_bootstrap(X_knn, X_test, y_knn, y_test, cv=5)
+    print("")
+
+    print("Building Bootstrap Model with KNN Upsampling")
+    bootstrap_knn_model, bootstrap_knn_test_mape = build_bootstrap(X_knn, X_test, y_knn, y_test, cv=5)
+    print("")
+
+    print("Building XGBoost Model with KNN Upsampling")
+    xgboost_knn_model, xgboost_knn_test_mape = build_xgboost(X_knn, X_test, y_knn, y_test, cv=5)
+    print("")
+    
+    print("Building No Bootstrap Model with Rebalanced KNN Upsampling")
+    no_bootstrap_reb_model, no_bootstrap_reb_test_mape = build_no_bootstrap(X_reb, X_test, y_reb, y_test, cv=5)
+    print("")
+
+    print("Building Bootstrap Model with Rebalanced KNN Upsampling")
+    bootstrap_reb_model, bootstrap_reb_test_mape = build_bootstrap(X_reb, X_test, y_reb, y_test, cv=5)
+    print("")
+
+    print("Building XGBoost Model with Rebalanced KNN Upsampling")
+    xgboost_reb_model, xgboost_reb_test_mape = build_xgboost(X_reb, X_test, y_reb, y_test, cv=5)
+    print("")
     
