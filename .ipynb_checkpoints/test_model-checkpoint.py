@@ -62,23 +62,30 @@ def prepare_df():
                   'gender_idx', 'ethnicity_idx', 'qalys_pc']]
     return df_vape
 
-def simple_duplicate(X, y, n_samples=200, random_state=None, noise_std=0.01):
-    # Set random state for reproducibility
-    if random_state is not None:
-        np.random.seed(random_state)
+def simple_duplicate(X, y, n_samples=200, random_state=None, noise_std=0.4):
+    columns = ['tax_increase', 'outlet_reduction', 'dec_smoking_prevalence', 
+              'dec_tobacco_supply', 'dec_smoking_uptake', 'average_age', 
+              'gender_idx', 'ethnicity_idx']
+    df = pd.DataFrame(X, columns=columns)
+    df['qalys_pc'] = y  
+    n_duplicates = n_samples // len(X) + 1
+    # Duplicate the DataFrame
+    df_duplicated = pd.concat([df]*n_duplicates, ignore_index=True)
 
-    # Determine how many times to duplicate the dataset
-    n_repeats = n_samples // len(X)
+    # Set the seed for reproducibility
+    np.random.seed(42)
 
-    # Duplicate the data n_repeats times
-    X_res = np.tile(X, (n_repeats, 1))
-    y_res = np.tile(y, n_repeats)
+    numeric_columns = ['tax_increase', 'outlet_reduction', 'dec_smoking_prevalence', 
+                       'dec_tobacco_supply', 'dec_smoking_uptake', 'average_age', 'qalys_pc']
 
-    # Add Gaussian noise to the duplicated data
-    noise = np.random.normal(0, 0.1, size=X_res.shape)
-    X_res = X_res + noise
+    # Add Gaussian noise to the numeric columns with a standard deviation of 0.1
+    for col in numeric_columns:
+        df_duplicated[col] += np.random.normal(0, 0.4, df_duplicated[col].shape)
 
-    return X_res, y_res
+    X_duplicated = df_duplicated[columns]
+    y_duplicated = df_duplicated['qalys_pc']
+
+    return np.array(X_duplicated), np.array(y_duplicated)
 
 # Function to generate synthetic samples
 def knn_samples(X, y, n_samples, random_state=42):
