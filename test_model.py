@@ -1,11 +1,11 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestRegressor
+import argparse
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
+from sklearn.ensemble import RandomForestRegressor, AdaBoostRegressor, StackingRegressor
 from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.model_selection import KFold
+from sklearn.model_selection import train_test_split, GridSearchCV, KFold
 from xgboost import XGBRegressor
 from sklearn.metrics import make_scorer
 from sklearn.metrics import mean_absolute_percentage_error as mape
@@ -13,9 +13,11 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import NearestNeighbors
 from sklearn.model_selection import cross_val_score
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.svm import SVR
 
 def prepare_df():
-    df = pd.read_excel('./Datasets/tobacco_data.xlsx')
+    df = pd.read_excel('./Datasets/tobacco_data_v2.xlsx')
     df.columns = df.iloc[0]
     df = df[1:]
     
@@ -60,33 +62,41 @@ def prepare_df():
     # Columns to be used for model building
     df_vape = df[['tax_increase', 'outlet_reduction', 'dec_smoking_prevalence', 
                   'dec_tobacco_supply', 'dec_smoking_uptake', 'average_age', 
-                  'gender_idx', 'ethnicity_idx', 'qalys_pc']]
+                  'gender_idx', 'ethnicity_idx', 'qalys_pc', 'hs_costs_pc']]
     return df_vape
 
-def simple_duplicate(X, y, n_samples=200, random_state=None, noise_std=0.4):
-    columns = ['tax_increase', 'outlet_reduction', 'dec_smoking_prevalence', 
-              'dec_tobacco_supply', 'dec_smoking_uptake', 'average_age', 
-              'gender_idx', 'ethnicity_idx']
-    df = pd.DataFrame(X, columns=columns)
-    df['qalys_pc'] = y  
-    n_duplicates = n_samples // len(X) + 1
-    # Duplicate the DataFrame
-    df_duplicated = pd.concat([df]*n_duplicates, ignore_index=True)
 
-    # Set the seed for reproducibility
-    np.random.seed(42)
+def simple_duplicate(X, y, n_samples=200, std_dev=0.4, random_state=None):
+    """
+    Duplicate X and y with added Gaussian noise.
+    
+    Parameters:
+        X (numpy.ndarray): Feature matrix.
+        y (numpy.ndarray): Target values.
+        n_samples (int): Number of new samples to generate.
+        std_dev (float): Standard deviation of the noise.
+        random_state (int, optional): Seed for reproducibility.
 
-    numeric_columns = ['tax_increase', 'outlet_reduction', 'dec_smoking_prevalence', 
-                       'dec_tobacco_supply', 'dec_smoking_uptake', 'average_age', 'qalys_pc']
-
-    # Add Gaussian noise to the numeric columns with a standard deviation of 0.1
-    for col in numeric_columns:
-        df_duplicated[col] += np.random.normal(0, 0.4, df_duplicated[col].shape)
-
-    X_duplicated = df_duplicated[columns]
-    y_duplicated = df_duplicated['qalys_pc']
-
-    return np.array(X_duplicated), np.array(y_duplicated)
+    Returns:
+        X_aug (numpy.ndarray): Augmented feature matrix.
+        y_aug (numpy.ndarray): Augmented target values.
+    """
+    if random_state is not None:
+        np.random.seed(random_state)
+    
+    # Select random samples from X and y
+    indices = np.random.choice(X.shape[0], size=n_samples, replace=True)
+    X_selected = X[indices]
+    y_selected = y[indices]
+    
+    # Add Gaussian noise to X
+    noise = np.random.normal(loc=0.0, scale=std_dev, size=X_selected.shape)
+    X_aug = X_selected + noise
+    
+    # Keep y unchanged or add noise to y if needed (optional)
+    y_aug = y_selected  # Add noise to y if required: y_selected + np.random.normal(0, std_dev, size=y_selected.shape)
+    
+    return X_aug, y_aug
 
 # Function to generate synthetic samples
 def knn_samples(X, y, n_samples, random_state=42):
@@ -194,7 +204,7 @@ def build_no_bootstrap(X_train, X_test, y_train, y_test, cv=5):
     print("Best Parameters for Random Forest (No Bootstrap):", grid_search_rf_no_bootstrap.best_params_)
     
     # Best MAPE score from cross-validation
-    print("Best MAPE for Random Forest (No Bootstrap):", -grid_search_rf_no_bootstrap.best_score_)
+    print("Best CV MAPE for Random Forest (No Bootstrap):", -grid_search_rf_no_bootstrap.best_score_)
     
     # Train a final model using the best parameters
     best_no_bootstrap_model = grid_search_rf_no_bootstrap.best_estimator_
@@ -234,7 +244,7 @@ def build_bootstrap(X_train, X_test, y_train, y_test, cv=5):
     print("Best Parameters for Random Forest:", grid_search_rf.best_params_)
     
     # Best MAPE score from cross-validation
-    print("Best MAPE for Random Forest:", -grid_search_rf.best_score_)
+    print("Best CV MAPE for Random Forest:", -grid_search_rf.best_score_)
     
     # Train a final model using the best parameters
     best_bootstrap_model = grid_search_rf.best_estimator_
@@ -272,10 +282,10 @@ def build_xgboost(X_train, X_test, y_train, y_test, cv=5):
     grid_search.fit(X_train, y_train)
     
     # Best hyperparameters from grid search
-    print("Best Parameters:", grid_search.best_params_)
+    print("Best Parameters for XGBoost:", grid_search.best_params_)
     
     # Best MAPE score from cross-validation
-    print("Best MAPE:", -grid_search.best_score_)
+    print("Best CV MAPE for XGBoost:", -grid_search.best_score_)
     
     # Train a final model using the best parameters
     best_xgb_model = grid_search.best_estimator_
@@ -285,19 +295,169 @@ def build_xgboost(X_train, X_test, y_train, y_test, cv=5):
     
     # Calculate the test MAPE
     test_mape = mape(y_test, y_pred)
-    print("Test MAPE:", test_mape)
+    print("Test MAPE for XGBoost:", test_mape)
 
     return best_xgb_model, test_mape
+
+def build_adaboost(X_train, X_test, y_train, y_test, cv=5):
+    # Define the AdaBoost model
+    ada_model = AdaBoostRegressor(random_state=42)
+    
+    # Define the parameter grid to search over
+    param_grid = {
+        'n_estimators': [50, 100, 200],  # Number of boosting stages
+        'learning_rate': [0.01, 0.1, 1],  # Weight applied to each regressor at each iteration
+        'loss': ['linear', 'square', 'exponential']  # Loss function to optimize
+    }
+    
+    # Define the MAPE scorer
+    mape_scorer = make_scorer(mape, greater_is_better=False)
+    
+    # Setup GridSearchCV to perform cross-validation
+    grid_search = GridSearchCV(estimator=ada_model, param_grid=param_grid, 
+                               scoring=mape_scorer, cv=cv, verbose=1, n_jobs=-1)
+    
+    # Fit the grid search to the training data
+    grid_search.fit(X_train, y_train)
+    
+    # Best hyperparameters from grid search
+    print("Best Parameters for AdaBoost:", grid_search.best_params_)
+    
+    # Best MAPE score from cross-validation
+    print("Best CV MAPE for AdaBoost:", -grid_search.best_score_)
+    
+    # Train a final model using the best parameters
+    best_ada_model = grid_search.best_estimator_
+    
+    # Evaluate on the test set
+    y_pred = best_ada_model.predict(X_test)
+    
+    # Calculate the test MAPE
+    test_mape = mape(y_test, y_pred)
+    print("Test MAPE for AdaBoost:", test_mape)
+    
+    return best_ada_model, test_mape
+
+def build_stacking(X_train, X_test, y_train, y_test, cv=5, tol=1e-4, max_iter=100):
+    # Define base learners
+    base_learners = [
+        ('ridge', Ridge(alpha=1.0)),
+        ('lasso', Lasso(alpha=0.1)),
+        ('svr', SVR(kernel='linear', C=1.0)),
+        ('tree', DecisionTreeRegressor(max_depth=5)),
+        ('rf', RandomForestRegressor(n_estimators=100, random_state=42))
+    ]
+    
+    # Define meta-learners to try
+    meta_learners = {
+        'ridge': Ridge(alpha=1.0),
+        'lasso': Lasso(alpha=0.1),
+        'svr': SVR(kernel='linear', C=1.0),
+        'rf': RandomForestRegressor(n_estimators=50, random_state=42)
+    }
+    
+    best_mape = float('inf')
+    best_model = None
+    best_meta = None
+    
+    for meta_name, meta_learner in meta_learners.items():
+        print(f"Trying meta-learner: {meta_name}")
+        stacking_model = StackingRegressor(estimators=base_learners, final_estimator=meta_learner, cv=cv)
+        
+        prev_loss = np.inf
+        for i in range(max_iter):
+            stacking_model.fit(X_train, y_train)
+            y_pred = stacking_model.predict(X_test)
+            test_mape = mape(y_test, y_pred)
+            
+            if abs(prev_loss - test_mape) < tol:
+                print(f"Converged after {i+1} iterations for meta-learner: {meta_name}")
+                break
+            prev_loss = test_mape
+        
+        print(f"Test MAPE for Stacking with {meta_name}: {test_mape}")
+        
+        if test_mape < best_mape:
+            best_mape = test_mape
+            best_model = stacking_model
+            best_meta = meta_name
+    
+    print(f"Best meta-learner: {best_meta} with Test MAPE: {best_mape}")
+    
+    return best_model, best_mape
+
+
+def ensemble(models, X_test, y_test):
+    predictions = []  # Use list instead of np.array
+    for model in models:
+        pred = model.predict(X_test)  # Predict on X_test
+        predictions.append(pred)  # Append predictions
+
+    predictions = np.array(predictions)  # Convert list to numpy array
+    final_pred = np.mean(predictions, axis=0)  # Average predictions across models
+    test_mape = mape(y_test, final_pred)  # Compute MAPE
+
+    return test_mape
+    
+def prepare_df_vape():
+    df_vape = pd.read_excel('./Datasets/vaping_data.xlsx')
+
+    # Map age group to integer
+    avg_age_mapping = {
+        '0-14': 7,
+        '15-24': 20,
+        '25-44': 33,
+        '45-64': 55,
+        '65+': 75
+    }
+    
+    # Map gender to integer
+    gender_mapping = {
+        'Male': 0,
+        'Female': 1
+    }
+
+    # Map ethnicity to integer
+    ethnicity_mapping = {
+        'Māori': 0,
+        'non-Māori': 1
+    }
+    
+    # Apply the mapping to the 'Age_Group' column
+    df_vape['average_age'] = df_vape['age'].map(avg_age_mapping)
+    df_vape['gender_idx'] = df_vape['gender'].map(gender_mapping)
+    df_vape['ethnicity_idx'] = df_vape['ethnicity'].map(ethnicity_mapping)
+
+    return df_vape
 
 if __name__ == "__main__":
     # Prepare DataFrame
     print("Preparing DataFrame")
-    df_vape = prepare_df()
+    df = prepare_df()
+
+    # Parse Arguments
+    parser = argparse.ArgumentParser(description="Select Model to Build")
+    
+    # Positional arguments for team names
+    parser.add_argument('model', type=int, help='0: QALY with base parameters, 1: HSCs with base parameters')
+    args = parser.parse_args()        
+    
     columns = ['tax_increase', 'outlet_reduction', 'dec_smoking_prevalence', 
               'dec_tobacco_supply', 'dec_smoking_uptake', 'average_age', 
               'gender_idx', 'ethnicity_idx']
-    X = df_vape[columns]
-    y = df_vape[['qalys_pc']]
+    
+    if args.model == 0:
+        X = df[columns]
+        y = df[['qalys_pc']]
+    elif args.model == 1:
+        X = df[columns]
+        y = df[['hs_costs_pc']]
+    elif args.model == 2:
+        columns.append('qalys_pc')
+        X = df[columns]
+        y = df[['hs_costs_pc']]
+    else:
+        raise ValueError("Invalid value for 'args.model'. Expected 0, 1, or 2.")
     
     # Train Test Split
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
@@ -313,6 +473,22 @@ if __name__ == "__main__":
     X_reb = pd.DataFrame(X_reb, columns=columns)
 
     # Build Models
+    """print("Building Stacking Model with no Upsampling")
+    stacking_model, stacking_test_mape = build_stacking(X_train, X_test, y_flat, y_test)
+    print("")
+
+    print("Building Stacking Model with Simple Duplication")
+    stacking_sim_model, stacking_sim_test_mape = build_stacking(X_sim, X_test, y_sim, y_test)
+    print("")
+
+    print("Building Stacking Model with KNN Upsampling")
+    stacking_knn_model, stacking_knn_test_mape = build_stacking(X_knn, X_test, y_knn, y_test)
+    print("")
+
+    print("Building Stacking Model with Rebalanced KNN Upsampling")
+    stacking_reb_model, stacking_reb_test_mape = build_stacking(X_reb, X_test, y_reb, y_test)
+    print("")"""
+    
     print("Building Linear Regression Model with no Upsampling")
     lr_model, lr_test_mape = build_lr(X_train, X_test, y_flat, y_test)
     print("")
@@ -377,13 +553,51 @@ if __name__ == "__main__":
     xgboost_reb_model, xgboost_reb_test_mape = build_xgboost(X_reb, X_test, y_reb, y_test, cv=5)
     print("")
 
+    print("Building AdaBoost Model with no Upsampling")
+    adaboost_model, adaboost_test_mape = build_adaboost(X_train, X_test, y_flat, y_test)
+    print("")
+
+    print("Building AdaBoost Model with Simple Dulpication")
+    adaboost_sim_model, adaboost_sim_test_mape = build_adaboost(X_sim, X_test, y_sim, y_test)
+    print("")
+
+    print("Building AdaBoost Model with KNN Upsampling")
+    adaboost_knn_model, adaboost_knn_test_mape = build_adaboost(X_knn, X_test, y_knn, y_test)
+    print("")
+
+    print("Building AdaBoost Model with Rebalanced KNN Upsampling")
+    adaboost_reb_model, adaboost_reb_test_mape = build_adaboost(X_reb, X_test, y_reb, y_test)
+    print("")
+
     # Row is model type
     summary = pd.DataFrame([[lr_test_mape, lr_sim_test_mape, lr_knn_test_mape, lr_reb_test_mape],
                            [no_bootstrap_test_mape, no_bootstrap_sim_test_mape, no_bootstrap_knn_test_mape, no_bootstrap_reb_test_mape],
                            [bootstrap_test_mape, bootstrap_sim_test_mape, bootstrap_knn_test_mape, bootstrap_reb_test_mape],
-                           [xgboost_test_mape, xgboost_sim_test_mape, xgboost_knn_test_mape, xgboost_reb_test_mape]],
-                          index = ['LinearRegression', 'RF No Bootstrap', 'RF Bootstrap', 'XGBoost'],
+                           [xgboost_test_mape, xgboost_sim_test_mape, xgboost_knn_test_mape, xgboost_reb_test_mape],
+                           [adaboost_test_mape, adaboost_sim_test_mape, adaboost_knn_test_mape, adaboost_reb_test_mape]],
+                          index = ['LinearRegression', 'RF No Bootstrap', 'RF Bootstrap', 'XGBoost', 'AdaBoost'],
                           columns = ['No Upsampling', 'Simple Duplication', 'KNN', 'Rebalanced KNN'])
     print("MAPE Summary Table")
     print(summary)
+    print("")
+
+    if args.model == 0:
+        summary.to_excel('./Datasets/model_mape_qaly.xlsx', index=False, engine='openpyxl')
+        print("Results Saved")
+    else:
+        summary.to_excel('./Datasets/model_mape_hsc.xlsx', index=False, engine='openpyxl')
+        print("Results Saved")
+    
+    if args.model == 0:
+        ensemble_models = [no_bootstrap_model, no_bootstrap_reb_model, xgboost_reb_model]
+    else:
+        ensemble_models = [xgboost_model, no_bootstrap_sim_model, no_bootstrap_reb_model, bootstrap_reb_model, xgboost_reb_model]
+    ensemble_mape = ensemble(ensemble_models, X_test, y_test)
+    print("Ensemble MAPE", ensemble_mape)
+    
+    
+    
+    
+        
+    
     
