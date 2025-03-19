@@ -15,6 +15,7 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.model_selection import cross_val_score
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.svm import SVR
+from openpyxl import load_workbook
 
 def prepare_df():
     df = pd.read_excel('./Datasets/tobacco_data_v2.xlsx')
@@ -65,7 +66,26 @@ def prepare_df():
                   'gender_idx', 'ethnicity_idx', 'qalys_pc', 'hs_costs_pc']]
     return df_vape
 
-
+def introduce_std_noise(df, columns):
+    """
+    Introduces noise into the specified columns by adding a random perturbation 
+    based on half the standard deviation of each column.
+    
+    Parameters:
+    df (pd.DataFrame): The input dataframe.
+    columns (list): List of column names to introduce noise.
+    seed (int, optional): Random seed for reproducibility.
+    
+    Returns:
+    pd.DataFrame: A new dataframe with noise introduced.
+    """    
+    df_copy = df.copy()
+    for col in columns:
+        std_dev = df[col].std() / 2  # Compute half the standard deviation
+        noise = np.random.normal(0, std_dev, size=df.shape[0])  # Generate noise
+        df_copy[col] += noise  # Add noise to the column
+    
+    return df_copy
 def simple_duplicate(X, y, n_samples=200, std_dev=0.4, random_state=None):
     """
     Duplicate X and y with added Gaussian noise.
@@ -338,7 +358,7 @@ def build_adaboost(X_train, X_test, y_train, y_test, cv=5):
     
     return best_ada_model, test_mape
 
-def build_stacking(X_train, X_test, y_train, y_test, cv=5, tol=1e-4, max_iter=100):
+def build_stacking(X_train, X_test, y_train, y_test, cv=5, tol=1e-4, max_iter=50, patience=5):
     # Define base learners
     base_learners = [
         ('ridge', Ridge(alpha=1.0)),
@@ -352,7 +372,7 @@ def build_stacking(X_train, X_test, y_train, y_test, cv=5, tol=1e-4, max_iter=10
     meta_learners = {
         'ridge': Ridge(alpha=1.0),
         'lasso': Lasso(alpha=0.1),
-        'svr': SVR(kernel='linear', C=1.0),
+        # 'svr': SVR(kernel='linear', C=1.0),
         'rf': RandomForestRegressor(n_estimators=50, random_state=42)
     }
     
@@ -361,28 +381,43 @@ def build_stacking(X_train, X_test, y_train, y_test, cv=5, tol=1e-4, max_iter=10
     best_meta = None
     
     for meta_name, meta_learner in meta_learners.items():
-        print(f"Trying meta-learner: {meta_name}")
+        print(f"\nTrying meta-learner: {meta_name}")
         stacking_model = StackingRegressor(estimators=base_learners, final_estimator=meta_learner, cv=cv)
         
         prev_loss = np.inf
+        no_improve_count = 0  # Track consecutive iterations with no improvement
+        
         for i in range(max_iter):
             stacking_model.fit(X_train, y_train)
             y_pred = stacking_model.predict(X_test)
             test_mape = mape(y_test, y_pred)
             
+            print(f"Iteration {i+1}: Test MAPE = {test_mape:.6f}")
+            
             if abs(prev_loss - test_mape) < tol:
                 print(f"Converged after {i+1} iterations for meta-learner: {meta_name}")
                 break
+            
+            if test_mape >= prev_loss:  
+                no_improve_count += 1
+            else:
+                no_improve_count = 0  # Reset counter if improvement occurs
+            
+            # If no improvement after 'patience' iterations, stop early
+            if no_improve_count >= patience:
+                print(f"Early stopping: No improvement after {patience} iterations for {meta_name}")
+                break
+            
             prev_loss = test_mape
         
-        print(f"Test MAPE for Stacking with {meta_name}: {test_mape}")
+        print(f"Final Test MAPE for {meta_name}: {test_mape:.6f}")
         
         if test_mape < best_mape:
             best_mape = test_mape
             best_model = stacking_model
             best_meta = meta_name
     
-    print(f"Best meta-learner: {best_meta} with Test MAPE: {best_mape}")
+    print(f"\nBest meta-learner: {best_meta} with Test MAPE: {best_mape:.6f}")
     
     return best_model, best_mape
 
@@ -430,6 +465,26 @@ def prepare_df_vape():
 
     return df_vape
 
+def append_to_excel(file_path, new_row, sheet_name="Sheet1"):
+    try:
+        # Load the existing workbook
+        book = load_workbook(file_path)
+        writer = pd.ExcelWriter(file_path, engine="openpyxl", mode="a", if_sheet_exists="overlay")
+        
+        # Get the last row number
+        sheet = book[sheet_name]
+        last_row = sheet.max_row
+
+        # Convert new_row to DataFrame and write at the next available row
+        df_new = pd.DataFrame([new_row])
+        df_new.to_excel(writer, index=False, header=False, sheet_name=sheet_name, startrow=last_row)
+
+        writer.close()
+    except FileNotFoundError:
+        # If the file doesn't exist, create a new one
+        df_new = pd.DataFrame([new_row])
+        df_new.to_excel(file_path, index=False, sheet_name=sheet_name)
+
 if __name__ == "__main__":
     # Prepare DataFrame
     print("Preparing DataFrame")
@@ -440,11 +495,16 @@ if __name__ == "__main__":
     
     # Positional arguments for team names
     parser.add_argument('model', type=int, help='0: QALY with base parameters, 1: HSCs with base parameters')
+    # Optional flag for variance
+    parser.add_argument('--variance', action='store_true', help='Apply variance to the specified columns')
+
     args = parser.parse_args()        
     
     columns = ['tax_increase', 'outlet_reduction', 'dec_smoking_prevalence', 
               'dec_tobacco_supply', 'dec_smoking_uptake', 'average_age', 
               'gender_idx', 'ethnicity_idx']
+
+   
     
     if args.model == 0:
         X = df[columns]
@@ -458,11 +518,17 @@ if __name__ == "__main__":
         y = df[['hs_costs_pc']]
     else:
         raise ValueError("Invalid value for 'args.model'. Expected 0, 1, or 2.")
-    
+
+
     # Train Test Split
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
     y_flat = y_train.values.flatten() # Ensure that y is a 1D array for compatibility
-    
+
+     # Change 
+    columns_to_modify = ['dec_smoking_prevalence', 'dec_smoking_uptake']
+    if args.variance:
+        X_train = introduce_std_noise(X_train, columns_to_modify)
+
     # Generate synthetic samples
     print("Generating Synthetic Samples")
     X_sim, y_sim = simple_duplicate(X_train.values, y_flat, n_samples=200, random_state=42)
@@ -473,127 +539,138 @@ if __name__ == "__main__":
     X_reb = pd.DataFrame(X_reb, columns=columns)
 
     # Build Models
-    """print("Building Stacking Model with no Upsampling")
-    stacking_model, stacking_test_mape = build_stacking(X_train, X_test, y_flat, y_test)
-    print("")
+    # print("Building Stacking Model with no Upsampling")
+    # stacking_model, stacking_test_mape = build_stacking(X_train, X_test, y_flat, y_test)
+    # print("")
 
-    print("Building Stacking Model with Simple Duplication")
-    stacking_sim_model, stacking_sim_test_mape = build_stacking(X_sim, X_test, y_sim, y_test)
-    print("")
+    # print("Building Stacking Model with Simple Duplication")
+    # stacking_sim_model, stacking_sim_test_mape = build_stacking(X_sim, X_test, y_sim, y_test)
+    # print("")
 
-    print("Building Stacking Model with KNN Upsampling")
-    stacking_knn_model, stacking_knn_test_mape = build_stacking(X_knn, X_test, y_knn, y_test)
-    print("")
+    # print("Building Stacking Model with KNN Upsampling")
+    # stacking_knn_model, stacking_knn_test_mape = build_stacking(X_knn, X_test, y_knn, y_test)
+    # print("")
 
-    print("Building Stacking Model with Rebalanced KNN Upsampling")
-    stacking_reb_model, stacking_reb_test_mape = build_stacking(X_reb, X_test, y_reb, y_test)
-    print("")"""
+    # print("Building Stacking Model with Rebalanced KNN Upsampling")
+    # stacking_reb_model, stacking_reb_test_mape = build_stacking(X_reb, X_test, y_reb, y_test)
+    # print("")
     
-    print("Building Linear Regression Model with no Upsampling")
-    lr_model, lr_test_mape = build_lr(X_train, X_test, y_flat, y_test)
-    print("")
+    # print("Building Linear Regression Model with no Upsampling")
+    # lr_model, lr_test_mape = build_lr(X_train, X_test, y_flat, y_test)
+    # print("")
     
-    print("Building Linear Regression Model with Simple Duplication")
-    lr_sim_model, lr_sim_test_mape = build_lr(X_sim, X_test, y_sim, y_test)
-    print("")
+    # print("Building Linear Regression Model with Simple Duplication")
+    # lr_sim_model, lr_sim_test_mape = build_lr(X_sim, X_test, y_sim, y_test)
+    # print("")
 
-    print("Building Linear Regression Model with KNN Upsampling")
-    lr_knn_model, lr_knn_test_mape = build_lr(X_knn, X_test, y_knn, y_test)
-    print("")
+    # print("Building Linear Regression Model with KNN Upsampling")
+    # lr_knn_model, lr_knn_test_mape = build_lr(X_knn, X_test, y_knn, y_test)
+    # print("")
 
-    print("Building Linear Regression with Rebalanced KNN Upsampling")
-    lr_reb_model, lr_reb_test_mape = build_lr(X_reb, X_test, y_reb, y_test)
-    print("")
+    # print("Building Linear Regression with Rebalanced KNN Upsampling")
+    # lr_reb_model, lr_reb_test_mape = build_lr(X_reb, X_test, y_reb, y_test)
+    # print("")
 
-    print("Building No Bootstrap Model with no Upsampling")
-    no_bootstrap_model, no_bootstrap_test_mape = build_no_bootstrap(X_train, X_test, y_flat, y_test)
-    print("")
+    # print("Building No Bootstrap Model with no Upsampling")
+    # no_bootstrap_model, no_bootstrap_test_mape = build_no_bootstrap(X_train, X_test, y_flat, y_test)
+    # print("")
     
-    print("Building No Bootstrap Model with Simple Duplication")
-    no_bootstrap_sim_model, no_bootstrap_sim_test_mape = build_no_bootstrap(X_sim, X_test, y_sim, y_test, cv=5)
-    print("")
+    # print("Building No Bootstrap Model with Simple Duplication")
+    # no_bootstrap_sim_model, no_bootstrap_sim_test_mape = build_no_bootstrap(X_sim, X_test, y_sim, y_test, cv=5)
+    # print("")
 
-    print("Building No Bootstrap Model with KNN Upsampling")
-    no_bootstrap_knn_model, no_bootstrap_knn_test_mape = build_no_bootstrap(X_knn, X_test, y_knn, y_test, cv=5)
-    print("")
+    # print("Building No Bootstrap Model with KNN Upsampling")
+    # no_bootstrap_knn_model, no_bootstrap_knn_test_mape = build_no_bootstrap(X_knn, X_test, y_knn, y_test, cv=5)
+    # print("")
 
     print("Building No Bootstrap Model with Rebalanced KNN Upsampling")
     no_bootstrap_reb_model, no_bootstrap_reb_test_mape = build_no_bootstrap(X_reb, X_test, y_reb, y_test, cv=5)
     print("")
 
-    print("Building Bootstrap Model with no Upsampling")
-    bootstrap_model, bootstrap_test_mape = build_bootstrap(X_train, X_test, y_flat, y_test)
-    print("")
+    # print("Building Bootstrap Model with no Upsampling")
+    # bootstrap_model, bootstrap_test_mape = build_bootstrap(X_train, X_test, y_flat, y_test)
+    # print("")
     
-    print("Building Bootstrap Model with Simple Duplication")
-    bootstrap_sim_model, bootstrap_sim_test_mape = build_bootstrap(X_sim, X_test, y_sim, y_test, cv=5)
-    print("")
+    # print("Building Bootstrap Model with Simple Duplication")
+    # bootstrap_sim_model, bootstrap_sim_test_mape = build_bootstrap(X_sim, X_test, y_sim, y_test, cv=5)
+    # print("")
 
-    print("Building Bootstrap Model with KNN Upsampling")
-    bootstrap_knn_model, bootstrap_knn_test_mape = build_bootstrap(X_knn, X_test, y_knn, y_test, cv=5)
-    print("")
+    # print("Building Bootstrap Model with KNN Upsampling")
+    # bootstrap_knn_model, bootstrap_knn_test_mape = build_bootstrap(X_knn, X_test, y_knn, y_test, cv=5)
+    # print("")
 
     print("Building Bootstrap Model with Rebalanced KNN Upsampling")
     bootstrap_reb_model, bootstrap_reb_test_mape = build_bootstrap(X_reb, X_test, y_reb, y_test, cv=5)
     print("")
 
-    print("Building XGBoost Model with no Upsampling")
-    xgboost_model, xgboost_test_mape = build_xgboost(X_train, X_test, y_flat, y_test)
-    print("")
+    # print("Building XGBoost Model with no Upsampling")
+    # xgboost_model, xgboost_test_mape = build_xgboost(X_train, X_test, y_flat, y_test)
+    # print("")
     
-    print("Building XGBoost Model with Simple Duplication")
-    xgboost_sim_model, xgboost_sim_test_mape = build_xgboost(X_sim, X_test, y_sim, y_test, cv=5)
-    print("")
+    # print("Building XGBoost Model with Simple Duplication")
+    # xgboost_sim_model, xgboost_sim_test_mape = build_xgboost(X_sim, X_test, y_sim, y_test, cv=5)
+    # print("")
 
-    print("Building XGBoost Model with KNN Upsampling")
-    xgboost_knn_model, xgboost_knn_test_mape = build_xgboost(X_knn, X_test, y_knn, y_test, cv=5)
-    print("")
+    # print("Building XGBoost Model with KNN Upsampling")
+    # xgboost_knn_model, xgboost_knn_test_mape = build_xgboost(X_knn, X_test, y_knn, y_test, cv=5)
+    # print("")
     
     print("Building XGBoost Model with Rebalanced KNN Upsampling")
     xgboost_reb_model, xgboost_reb_test_mape = build_xgboost(X_reb, X_test, y_reb, y_test, cv=5)
     print("")
 
-    print("Building AdaBoost Model with no Upsampling")
-    adaboost_model, adaboost_test_mape = build_adaboost(X_train, X_test, y_flat, y_test)
-    print("")
+    # print("Building AdaBoost Model with no Upsampling")
+    # adaboost_model, adaboost_test_mape = build_adaboost(X_train, X_test, y_flat, y_test)
+    # print("")
 
-    print("Building AdaBoost Model with Simple Dulpication")
-    adaboost_sim_model, adaboost_sim_test_mape = build_adaboost(X_sim, X_test, y_sim, y_test)
-    print("")
+    # print("Building AdaBoost Model with Simple Dulpication")
+    # adaboost_sim_model, adaboost_sim_test_mape = build_adaboost(X_sim, X_test, y_sim, y_test)
+    # print("")
 
-    print("Building AdaBoost Model with KNN Upsampling")
-    adaboost_knn_model, adaboost_knn_test_mape = build_adaboost(X_knn, X_test, y_knn, y_test)
-    print("")
+    # print("Building AdaBoost Model with KNN Upsampling")
+    # adaboost_knn_model, adaboost_knn_test_mape = build_adaboost(X_knn, X_test, y_knn, y_test)
+    # print("")
 
-    print("Building AdaBoost Model with Rebalanced KNN Upsampling")
-    adaboost_reb_model, adaboost_reb_test_mape = build_adaboost(X_reb, X_test, y_reb, y_test)
-    print("")
+    # print("Building AdaBoost Model with Rebalanced KNN Upsampling")
+    # adaboost_reb_model, adaboost_reb_test_mape = build_adaboost(X_reb, X_test, y_reb, y_test)
+    # print("")
 
-    # Row is model type
-    summary = pd.DataFrame([[lr_test_mape, lr_sim_test_mape, lr_knn_test_mape, lr_reb_test_mape],
-                           [no_bootstrap_test_mape, no_bootstrap_sim_test_mape, no_bootstrap_knn_test_mape, no_bootstrap_reb_test_mape],
-                           [bootstrap_test_mape, bootstrap_sim_test_mape, bootstrap_knn_test_mape, bootstrap_reb_test_mape],
-                           [xgboost_test_mape, xgboost_sim_test_mape, xgboost_knn_test_mape, xgboost_reb_test_mape],
-                           [adaboost_test_mape, adaboost_sim_test_mape, adaboost_knn_test_mape, adaboost_reb_test_mape]],
-                          index = ['LinearRegression', 'RF No Bootstrap', 'RF Bootstrap', 'XGBoost', 'AdaBoost'],
-                          columns = ['No Upsampling', 'Simple Duplication', 'KNN', 'Rebalanced KNN'])
-    print("MAPE Summary Table")
-    print(summary)
-    print("")
+    # # Row is model type
+    # summary = pd.DataFrame([[lr_test_mape, lr_sim_test_mape, lr_knn_test_mape, lr_reb_test_mape],
+    #                        [no_bootstrap_test_mape, no_bootstrap_sim_test_mape, no_bootstrap_knn_test_mape, no_bootstrap_reb_test_mape],
+    #                        [bootstrap_test_mape, bootstrap_sim_test_mape, bootstrap_knn_test_mape, bootstrap_reb_test_mape],
+    #                        [xgboost_test_mape, xgboost_sim_test_mape, xgboost_knn_test_mape, xgboost_reb_test_mape],
+    #                        [adaboost_test_mape, adaboost_sim_test_mape, adaboost_knn_test_mape, adaboost_reb_test_mape],
+    #                        [stacking_test_mape, stacking_sim_test_mape, stacking_knn_test_mape, stacking_reb_test_mape]],
+    #                       index = ['LinearRegression', 'RF No Bootstrap', 'RF Bootstrap', 'XGBoost', 'AdaBoost', 'Stacking'],
+    #                       columns = ['No Upsampling', 'Simple Duplication', 'KNN', 'Rebalanced KNN'])
+    # print("MAPE Summary Table")
+    # print(summary)
+    # print("")
 
-    if args.model == 0:
-        summary.to_excel('./Datasets/model_mape_qaly.xlsx', index=False, engine='openpyxl')
-        print("Results Saved")
-    else:
-        summary.to_excel('./Datasets/model_mape_hsc.xlsx', index=False, engine='openpyxl')
-        print("Results Saved")
+    # if args.model == 0:
+    #     summary.to_excel('./Datasets/model_mape_qaly.xlsx', index=False, engine='openpyxl')
+    #     print("Results Saved")
+    # else:
+    #     summary.to_excel('./Datasets/model_mape_hsc.xlsx', index=False, engine='openpyxl')
+    #     print("Results Saved")
     
-    if args.model == 0:
-        ensemble_models = [no_bootstrap_model, no_bootstrap_reb_model, xgboost_reb_model]
-    else:
-        ensemble_models = [xgboost_model, no_bootstrap_sim_model, no_bootstrap_reb_model, bootstrap_reb_model, xgboost_reb_model]
-    ensemble_mape = ensemble(ensemble_models, X_test, y_test)
-    print("Ensemble MAPE", ensemble_mape)
+    # if args.model == 0:
+    #     ensemble_models = [no_bootstrap_model, no_bootstrap_reb_model, xgboost_reb_model]
+    # else:
+    #     ensemble_models = [xgboost_model, no_bootstrap_sim_model, no_bootstrap_reb_model, bootstrap_reb_model, xgboost_reb_model]
+    # ensemble_mape = ensemble(ensemble_models, X_test, y_test)
+    # print("Ensemble MAPE", ensemble_mape)
+
+    if args.variance:
+        new_row = [no_bootstrap_reb_test_mape, bootstrap_reb_test_mape, xgboost_reb_test_mape]
+        if args.model == 0:
+            append_to_excel("./Datasets/variance_qaly.xlsx", new_row)
+        else:
+            append_to_excel("./Datasets/variance_hsc.xlsx", new_row)
+            
+        
+        
     
     
     
