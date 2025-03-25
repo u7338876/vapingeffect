@@ -164,6 +164,87 @@ def build_no_bootstrap(X_train, X_test, y_train, y_test, cv=5):
 
     return best_no_bootstrap_model, test_mape
 
+def build_bootstrap(X_train, X_test, y_train, y_test, cv=5):    
+    # Define the RandomForestRegressor model
+    rf_model = RandomForestRegressor(random_state=42, bootstrap=True)
+    
+    # Define the parameter grid to search over
+    param_grid = {
+        'n_estimators': [100, 200, 300],    # Number of trees in the forest
+        'max_depth': [5, 10, 20],            # Maximum depth of the tree
+        'min_samples_leaf': [1, 5, 10],      # Minimum number of samples required to be at a leaf node
+        'max_samples': [0.5, 0.7, 1.0],     # Maximum number of samples to draw from the data with replacement
+    }
+    
+    # Define the MAPE scorer (using Mean Absolute Percentage Error)
+    mape_scorer = make_scorer(mape, greater_is_better=False)
+    
+    # Setup GridSearchCV to perform cross-validation
+    grid_search_rf = GridSearchCV(estimator=rf_model, param_grid=param_grid, 
+                                  scoring=mape_scorer, cv=5, verbose=1, n_jobs=-1)
+    
+    # Fit the grid search to the duplicated training data
+    grid_search_rf.fit(X_train, y_train)
+    
+    # Best hyperparameters from grid search
+    print("Best Parameters for Random Forest:", grid_search_rf.best_params_)
+    
+    # Best MAPE score from cross-validation
+    print("Best CV MAPE for Random Forest:", -grid_search_rf.best_score_)
+    
+    # Train a final model using the best parameters
+    best_bootstrap_model = grid_search_rf.best_estimator_
+    
+    # Evaluate on the test set
+    y_pred_rf = best_bootstrap_model.predict(X_test)
+    
+    # Calculate the test MAPE
+    test_mape = mape(y_test, y_pred_rf)
+    print("Test MAPE for Random Forest:", test_mape)
+
+    return best_bootstrap_model, test_mape
+
+def build_xgboost(X_train, X_test, y_train, y_test, cv=5):
+    # Define the XGBoost model
+    xgb_model = XGBRegressor(objective='reg:squarederror', random_state=42)
+    
+    # Define the parameter grid to search over
+    param_grid = {
+        'n_estimators': [100, 200, 300],   # Number of trees
+        'max_depth': [5, 10, 20],            # Depth of the trees
+        'min_child_weight': [1, 5, 10],     # Minimum sum of instance weight (hessian)
+        'reg_lambda': [0.01, 0.1, 1, 10],  # L2 regularization term (lambda)
+        'reg_alpha': [0.01, 0.1, 1, 10],      # L1 regularization term (alpha)
+    }
+    
+    # Define the MAPE scorer (as we are optimizing based on Mean Absolute Percentage Error)
+    mape_scorer = make_scorer(mape, greater_is_better=False)
+    
+    # Setup GridSearchCV to perform cross-validation
+    grid_search = GridSearchCV(estimator=xgb_model, param_grid=param_grid, 
+                               scoring=mape_scorer, cv=5, verbose=1, n_jobs=-1)
+    
+    # Fit the grid search to the duplicated training data
+    grid_search.fit(X_train, y_train)
+    
+    # Best hyperparameters from grid search
+    print("Best Parameters for XGBoost:", grid_search.best_params_)
+    
+    # Best MAPE score from cross-validation
+    print("Best CV MAPE for XGBoost:", -grid_search.best_score_)
+    
+    # Train a final model using the best parameters
+    best_xgb_model = grid_search.best_estimator_
+    
+    # Evaluate on the test set
+    y_pred = best_xgb_model.predict(X_test)
+    
+    # Calculate the test MAPE
+    test_mape = mape(y_test, y_pred)
+    print("Test MAPE for XGBoost:", test_mape)
+
+    return best_xgb_model, test_mape
+
 if __name__ == "__main__":
     # Prepare datasets
     df = prepare_df()
@@ -187,12 +268,25 @@ if __name__ == "__main__":
     # Prepare Models
     qaly_no_bootstrap = RandomForestRegressor(random_state=42, bootstrap=False, 
                                           max_depth=10, min_samples_leaf=1, n_estimators=300)
+    qaly_bootstrap = RandomForestRegressor(random_state=42, bootstrap=True,
+                                          max_depth=20, min_samples_leaf=1, max_samples=1, n_estimators=300)
+    qaly_xgboost = XGBRegressor(objective='reg:squarederror', random_state=42, max_depth=20, min_child_weight=1, 
+                            n_estimators=100, reg_alpha=0.01, reg_lambda=1)
+    hsc_no_bootstrap = RandomForestRegressor(random_state=42, bootstrap=False, 
+                                          max_depth=10, min_samples_leaf=1, n_estimators=100)
+    hsc_bootstrap = XGBRegressor(random_state=42, bootstrap=True,
+                                          max_depth=20, min_samples_leaf=1, max_samples=1, n_estimators=300)
     hsc_xgboost = XGBRegressor(objective='reg:squarederror', random_state=42, max_depth=20, min_child_weight=1, 
                             n_estimators=300, reg_alpha=10, reg_lambda=1)
 
     # Train QALY Model
     qaly_no_bootstrap.fit(X_reb, y_reb)
-    qaly_pred = qaly_no_bootstrap.predict(pred)
+    qaly_no_bootstrap_pred = qaly_no_bootstrap.predict(pred)
+    qaly_bootstrap.fit(X_reb, y_reb)
+    qaly_bootstrap_pred = qaly_bootstrap.predict(pred)
+    qaly_xgboost.fit(X_reb, y_reb)
+    qaly_xgboost_pred = qaly_xgboost.predict(pred)
+    qaly_pred = (qaly_no_bootstrap_pred + qaly_bootstrap_pred + qaly_xgboost_pred) / 3
     pred['qalys_pc'] = qaly_pred
 
     # Train HSC Model
@@ -204,8 +298,13 @@ if __name__ == "__main__":
     X_reb, y_reb = knn_samples_rebalanced(X_train.values, y_flat, n_samples=200, random_state=42)
     X_reb = pd.DataFrame(X_reb, columns=columns)
 
+    hsc_no_bootstrap.fit(X_reb, y_reb)
+    hsc_no_bootstrap_pred = hsc_no_bootstrap.predict(pred)
+    hsc_bootstrap.fit(X_reb, y_reb)
+    hsc_bootstrap_pred = hsc_bootstrap.predict(pred)
     hsc_xgboost.fit(X_reb, y_reb)
-    hsc_pred = hsc_xgboost.predict(pred)
+    hsc_xgboost_pred = hsc_xgboost.predict(pred)
+    hsc_pred = (hsc_no_bootstrap_pred + hsc_bootstrap_pred + hsc_xgboost_pred) / 3
 
     pred['hs_costs_pc'] = hsc_pred
     result = df_vape[['age', 'gender', 'ethnicity']].copy()

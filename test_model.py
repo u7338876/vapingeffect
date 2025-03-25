@@ -15,10 +15,11 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.model_selection import cross_val_score
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.svm import SVR
+from sklearn.impute import KNNImputer
 from openpyxl import load_workbook
 
-def prepare_df():
-    df = pd.read_excel('./Datasets/tobacco_data_v2.xlsx')
+def prepare_df(path):
+    df = pd.read_excel(path)
     df.columns = df.iloc[0]
     df = df[1:]
     
@@ -485,11 +486,31 @@ def append_to_excel(file_path, new_row, sheet_name="Sheet1"):
         df_new = pd.DataFrame([new_row])
         df_new.to_excel(file_path, index=False, sheet_name=sheet_name)
 
-if __name__ == "__main__":
-    # Prepare DataFrame
-    print("Preparing DataFrame")
-    df = prepare_df()
+def impute_mean(df):
+    # Replace 'NA' strings with actual NaN values
+    df.replace('NA', np.nan, inplace=True)
 
+    # Convert columns to numeric (if they were stored as strings)
+    df = df.apply(pd.to_numeric)
+
+    # Impute missing values with column means
+    df.fillna(df.mean(numeric_only=True), inplace=True)
+    return df
+
+def impute_knn(df, n_neighbors=5):
+    # Replace 'NA' strings with actual NaN values
+    df.replace('NA', np.nan, inplace=True)
+
+    # Convert columns to numeric (if they were stored as strings)
+    df = df.apply(pd.to_numeric)
+
+    # Apply KNN imputation
+    imputer = KNNImputer(n_neighbors=n_neighbors)
+    df[:] = imputer.fit_transform(df)
+
+    return df
+
+if __name__ == "__main__":
     # Parse Arguments
     parser = argparse.ArgumentParser(description="Select Model to Build")
     
@@ -497,15 +518,26 @@ if __name__ == "__main__":
     parser.add_argument('model', type=int, help='0: QALY with base parameters, 1: HSCs with base parameters')
     # Optional flag for variance
     parser.add_argument('--variance', action='store_true', help='Apply variance to the specified columns')
+    parser.add_argument('--noimpute', action='store_true', help='Apply variance to the specified columns')
 
     args = parser.parse_args()        
+
+    # Prepare DataFrame
+    print("Preparing DataFrame")
+    path = './Datasets/tobacco_data_v2.xlsx'
+    if args.noimpute:
+        path = './Datasets/tobacco_data.xlsx'
+        
+    df = prepare_df(path)
     
     columns = ['tax_increase', 'outlet_reduction', 'dec_smoking_prevalence', 
               'dec_tobacco_supply', 'dec_smoking_uptake', 'average_age', 
               'gender_idx', 'ethnicity_idx']
 
+    if args.noimpute:
+        df = impute_knn(df)
+        # df = impute_mean(df)
    
-    
     if args.model == 0:
         X = df[columns]
         y = df[['qalys_pc']]
@@ -655,12 +687,9 @@ if __name__ == "__main__":
     #     summary.to_excel('./Datasets/model_mape_hsc.xlsx', index=False, engine='openpyxl')
     #     print("Results Saved")
     
-    # if args.model == 0:
-    #     ensemble_models = [no_bootstrap_model, no_bootstrap_reb_model, xgboost_reb_model]
-    # else:
-    #     ensemble_models = [xgboost_model, no_bootstrap_sim_model, no_bootstrap_reb_model, bootstrap_reb_model, xgboost_reb_model]
-    # ensemble_mape = ensemble(ensemble_models, X_test, y_test)
-    # print("Ensemble MAPE", ensemble_mape)
+    ensemble_models = [no_bootstrap_reb_model, bootstrap_reb_model, xgboost_reb_model]
+    ensemble_mape = ensemble(ensemble_models, X_test, y_test)
+    print("Ensemble MAPE", ensemble_mape)
 
     if args.variance:
         new_row = [no_bootstrap_reb_test_mape, bootstrap_reb_test_mape, xgboost_reb_test_mape]

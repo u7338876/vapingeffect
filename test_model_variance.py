@@ -10,4 +10,4 @@ def run_multiple_times(n=100):
         subprocess.run(["python", "test_model.py", "2", "--variance"], check=True)
 
 if __name__ == "__main__":
-    run_multiple_times(100)
+    run_multiple_times(10)
