@@ -268,10 +268,6 @@ if __name__ == "__main__":
     # Prepare Models
     qaly_no_bootstrap = RandomForestRegressor(random_state=42, bootstrap=False, 
                                           max_depth=10, min_samples_leaf=1, n_estimators=300)
-    qaly_bootstrap = RandomForestRegressor(random_state=42, bootstrap=True,
-                                          max_depth=20, min_samples_leaf=1, max_samples=1, n_estimators=300)
-    qaly_xgboost = XGBRegressor(objective='reg:squarederror', random_state=42, max_depth=20, min_child_weight=1, 
-                            n_estimators=100, reg_alpha=0.01, reg_lambda=1)
     hsc_no_bootstrap = RandomForestRegressor(random_state=42, bootstrap=False, 
                                           max_depth=10, min_samples_leaf=1, n_estimators=100)
     hsc_bootstrap = XGBRegressor(random_state=42, bootstrap=True,
@@ -281,12 +277,7 @@ if __name__ == "__main__":
 
     # Train QALY Model
     qaly_no_bootstrap.fit(X_reb, y_reb)
-    qaly_no_bootstrap_pred = qaly_no_bootstrap.predict(pred)
-    qaly_bootstrap.fit(X_reb, y_reb)
-    qaly_bootstrap_pred = qaly_bootstrap.predict(pred)
-    qaly_xgboost.fit(X_reb, y_reb)
-    qaly_xgboost_pred = qaly_xgboost.predict(pred)
-    qaly_pred = (qaly_no_bootstrap_pred + qaly_bootstrap_pred + qaly_xgboost_pred) / 3
+    qaly_pred = qaly_no_bootstrap.predict(pred)
     pred['qalys_pc'] = qaly_pred
 
     # Train HSC Model
