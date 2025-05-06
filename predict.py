@@ -1,9 +1,12 @@
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestRegressor, StackingRegressor
 from xgboost import XGBRegressor
 from sklearn.neighbors import NearestNeighbors
 from sklearn.model_selection import train_test_split
+from sklearn.linear_model import Ridge, Lasso
+from sklearn.svm import SVR
+from sklearn.tree import DecisionTreeRegressor
 
 def prepare_df():
     df = pd.read_excel('./Datasets/tobacco_data_v2.xlsx')
@@ -265,19 +268,79 @@ if __name__ == "__main__":
     df_vape = prepare_df_vape()
     pred = df_vape.drop(columns=['age', 'gender', 'ethnicity'])
 
-    # Prepare Models
-    qaly_no_bootstrap = RandomForestRegressor(random_state=42, bootstrap=False, 
-                                          max_depth=10, min_samples_leaf=1, n_estimators=300)
-    hsc_no_bootstrap = RandomForestRegressor(random_state=42, bootstrap=False, 
-                                          max_depth=10, min_samples_leaf=1, n_estimators=100)
-    hsc_bootstrap = XGBRegressor(random_state=42, bootstrap=True,
-                                          max_depth=20, min_samples_leaf=1, max_samples=1, n_estimators=300)
-    hsc_xgboost = XGBRegressor(objective='reg:squarederror', random_state=42, max_depth=20, min_child_weight=1, 
-                            n_estimators=300, reg_alpha=10, reg_lambda=1)
+    # QALY Prepare Models
+    # 1. Random Forest (No Bootstrap)
+    qaly_rf_no_bootstrap = RandomForestRegressor(
+        n_estimators=200,
+        max_depth=10,
+        min_samples_leaf=1,
+        bootstrap=False,
+        random_state=42
+    )
+    
+    # 2. Random Forest (With Bootstrap)
+    qaly_rf_bootstrap = RandomForestRegressor(
+        n_estimators=200,
+        max_depth=20,
+        min_samples_leaf=1,
+        bootstrap=True,    # default is True, but specifying for clarity
+        max_samples=1.0,   # 1.0 = 100% sampling
+        random_state=42
+    )
+    
+    # 3. XGBoost (No Bootstrap)
+    qaly_xgb_no_bootstrap = XGBRegressor(
+        n_estimators=100,
+        max_depth=10,
+        min_child_weight=1,
+        reg_alpha=0.1,
+        reg_lambda=0.01,
+        objective='reg:squarederror',  # to avoid warnings
+        random_state=42
+    )
+    
+    # 4. XGBoost (With Bootstrap)
+    qaly_xgb_bootstrap = XGBRegressor(
+        n_estimators=300,
+        max_depth=20,
+        min_child_weight=1,
+        reg_alpha=0.1,
+        reg_lambda=0.1,
+        sampling_method='uniform',
+        subsample=0.999,
+        objective='reg:squarederror',
+        random_state=42
+    )
+    
+    qaly_stacking = StackingRegressor(
+        cv=5,
+        estimators=[
+            ('ridge', Ridge()),
+            ('lasso', Lasso(alpha=0.1)),
+            ('svr', SVR(kernel='linear')),
+            ('tree', DecisionTreeRegressor(max_depth=5)),
+            ('rf', RandomForestRegressor(random_state=42))
+        ],
+        final_estimator=Lasso(alpha=0.1)
+    )
 
     # Train QALY Model
-    qaly_no_bootstrap.fit(X_reb, y_reb)
-    qaly_pred = qaly_no_bootstrap.predict(pred)
+    qaly_rf_no_bootstrap.fit(X_reb, y_reb)
+    qaly_rf_no_bootstrap_pred = qaly_rf_no_bootstrap.predict(pred)
+    
+    qaly_rf_bootstrap.fit(X_reb, y_reb)
+    qaly_rf_bootstrap_pred = qaly_rf_bootstrap.predict(pred)
+    
+    qaly_xgb_no_bootstrap.fit(X_reb, y_reb)
+    qaly_xgb_no_bootstrap_pred = qaly_xgb_no_bootstrap.predict(pred)
+    
+    qaly_xgb_bootstrap.fit(X_reb, y_reb)
+    qaly_xgb_bootstrap_pred = qaly_xgb_bootstrap.predict(pred)
+    
+    qaly_stacking.fit(X_reb, y_reb)
+    qaly_stacking_pred = qaly_stacking.predict(pred)
+    
+    qaly_pred = (qaly_rf_no_bootstrap_pred + qaly_rf_bootstrap_pred + qaly_xgb_no_bootstrap_pred + qaly_xgb_bootstrap_pred + qaly_stacking_pred) / 5
     pred['qalys_pc'] = qaly_pred
 
     # Train HSC Model
@@ -289,13 +352,88 @@ if __name__ == "__main__":
     X_reb, y_reb = knn_samples_rebalanced(X_train.values, y_flat, n_samples=200, random_state=42)
     X_reb = pd.DataFrame(X_reb, columns=columns)
 
-    hsc_no_bootstrap.fit(X_reb, y_reb)
-    hsc_no_bootstrap_pred = hsc_no_bootstrap.predict(pred)
-    hsc_bootstrap.fit(X_reb, y_reb)
-    hsc_bootstrap_pred = hsc_bootstrap.predict(pred)
-    hsc_xgboost.fit(X_reb, y_reb)
-    hsc_xgboost_pred = hsc_xgboost.predict(pred)
-    hsc_pred = (hsc_no_bootstrap_pred + hsc_bootstrap_pred + hsc_xgboost_pred) / 3
+    # Prepare HSC Models
+    hsc_rf_no_bootstrap = RandomForestRegressor(
+        max_depth=10,
+        min_samples_leaf=1,
+        n_estimators=300,
+        bootstrap=False,        # No bootstrapping
+        random_state=42,
+        n_jobs=-1
+    )
+        
+        
+    hsc_rf_bootstrap = RandomForestRegressor(
+        max_depth=20,
+        max_samples=1.0,         # Using all samples
+        min_samples_leaf=1,
+        n_estimators=300,
+        bootstrap=True,          # Bootstrapping enabled
+        random_state=42,
+        n_jobs=-1
+    )
+        
+        
+    hsc_xgb_no_bootstrap = XGBRegressor(
+        max_depth=20,
+        min_child_weight=1,
+        n_estimators=100,
+        reg_alpha=0.1,
+        reg_lambda=1,
+        objective='reg:squarederror',
+        random_state=42,
+        n_jobs=-1
+    )
+    
+    hsc_xgb_bootstrap = XGBRegressor(
+        max_depth=20,
+        min_child_weight=1,
+        n_estimators=300,
+        reg_alpha=10,
+        reg_lambda=0.1,
+        subsample=0.75,
+        sampling_method='uniform',    # uniform sampling
+        objective='reg:squarederror',
+        random_state=42,
+        n_jobs=-1
+    )
+    
+    # Base learners
+    base_learners = [
+        ('ridge', Ridge(alpha=1.0)),
+        ('lasso', Lasso(alpha=0.1)),
+        ('svr', SVR(kernel='linear', C=1.0)),
+        ('tree', DecisionTreeRegressor(max_depth=5)),
+        ('rf', RandomForestRegressor(n_estimators=100, random_state=42))
+    ]
+    
+    # Meta learner
+    meta_learner = RandomForestRegressor(n_estimators=50, random_state=42)
+    
+    # Stacking ensemble
+    hsc_stacking = StackingRegressor(
+        estimators=base_learners,
+        final_estimator=meta_learner,
+        cv=5,
+        n_jobs=-1
+    )
+
+    hsc_rf_no_bootstrap.fit(X_reb, y_reb)
+    hsc_rf_no_bootstrap_pred = hsc_rf_no_bootstrap.predict(pred)
+    
+    hsc_rf_bootstrap.fit(X_reb, y_reb)
+    hsc_rf_bootstrap_pred = hsc_rf_bootstrap.predict(pred)
+    
+    hsc_xgb_no_bootstrap.fit(X_reb, y_reb)
+    hsc_xgb_no_bootstrap_pred = hsc_xgb_no_bootstrap.predict(pred)
+    
+    hsc_xgb_bootstrap.fit(X_reb, y_reb)
+    hsc_xgb_bootstrap_pred = hsc_xgb_bootstrap.predict(pred)
+    
+    hsc_stacking.fit(X_reb, y_reb)
+    hsc_stacking_pred = hsc_stacking.predict(pred)
+    
+    hsc_pred = (hsc_rf_no_bootstrap_pred + hsc_rf_bootstrap_pred + hsc_xgb_no_bootstrap_pred + hsc_xgb_bootstrap_pred + hsc_stacking_pred) / 5
 
     pred['hs_costs_pc'] = hsc_pred
     result = df_vape[['age', 'gender', 'ethnicity']].copy()

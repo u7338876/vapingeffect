@@ -724,11 +724,11 @@ if __name__ == "__main__":
 
     # Generate synthetic samples
     print("Generating Synthetic Samples")
-    X_sim, y_sim = simple_duplicate(X_train.values, y_flat, n_samples=300, random_state=42)
+    X_sim, y_sim = simple_duplicate(X_train.values, y_flat, n_samples=500, random_state=42)
     X_sim = pd.DataFrame(X_sim, columns=columns)
-    X_knn, y_knn = knn_samples(X_train.values, y_flat, n_samples=300, random_state=42)
+    X_knn, y_knn = knn_samples(X_train.values, y_flat, n_samples=500, random_state=42)
     X_knn = pd.DataFrame(X_knn, columns=columns)
-    X_reb, y_reb = knn_samples_rebalanced(X_train.values, y_flat, n_samples=300, random_state=42)
+    X_reb, y_reb = knn_samples_rebalanced(X_train.values, y_flat, n_samples=500, random_state=42)
     X_reb = pd.DataFrame(X_reb, columns=columns)
 
     # Build Models
@@ -744,9 +744,9 @@ if __name__ == "__main__":
     # stacking_knn_model, stacking_knn_test_mape = build_stacking(X_knn, X_test, y_knn, y_test)
     # print("")
 
-    # print("Building Stacking Model with Rebalanced KNN Upsampling")
-    # stacking_reb_model, stacking_reb_test_mape = build_stacking(X_reb, X_test, y_reb, y_test)
-    # print("")
+    print("Building Stacking Model with Rebalanced KNN Upsampling")
+    stacking_reb_model, stacking_reb_test_mape = build_stacking(X_reb, X_test, y_reb, y_test)
+    print("")
     
     # print("Building Linear Regression Model with no Upsampling")
     # lr_model, lr_test_mape = build_lr(X_train, X_test, y_flat, y_test)
@@ -776,9 +776,9 @@ if __name__ == "__main__":
     # no_bootstrap_knn_model, no_bootstrap_knn_test_mape = build_no_bootstrap(X_knn, X_test, y_knn, y_test, cv=5)
     # print("")
 
-    # print("Building No Bootstrap Model with Rebalanced KNN Upsampling")
-    # no_bootstrap_reb_model, no_bootstrap_reb_test_mape = build_no_bootstrap(X_reb, X_test, y_reb, y_test, cv=5)
-    # print("")
+    print("Building No Bootstrap Model with Rebalanced KNN Upsampling")
+    no_bootstrap_reb_model, no_bootstrap_reb_test_mape = build_no_bootstrap(X_reb, X_test, y_reb, y_test, cv=5)
+    print("")
 
     # print("Building Bootstrap Model with no Upsampling")
     # bootstrap_model, bootstrap_test_mape = build_bootstrap(X_train, X_test, y_flat, y_test)
@@ -792,9 +792,9 @@ if __name__ == "__main__":
     # bootstrap_knn_model, bootstrap_knn_test_mape = build_bootstrap(X_knn, X_test, y_knn, y_test, cv=5)
     # print("")
 
-    # print("Building Bootstrap Model with Rebalanced KNN Upsampling")
-    # bootstrap_reb_model, bootstrap_reb_test_mape = build_bootstrap(X_reb, X_test, y_reb, y_test, cv=5)
-    # print("")
+    print("Building Bootstrap Model with Rebalanced KNN Upsampling")
+    bootstrap_reb_model, bootstrap_reb_test_mape = build_bootstrap(X_reb, X_test, y_reb, y_test, cv=5)
+    print("")
 
     # print("Building XGBoost Model with no Upsampling")
     # xgboost_model, xgboost_test_mape = build_xgboost(X_train, X_test, y_flat, y_test)
@@ -808,9 +808,9 @@ if __name__ == "__main__":
     # xgboost_knn_model, xgboost_knn_test_mape = build_xgboost(X_knn, X_test, y_knn, y_test, cv=5)
     # print("")
     
-    # print("Building XGBoost Model with Rebalanced KNN Upsampling")
-    # xgboost_reb_model, xgboost_reb_test_mape = build_xgboost(X_reb, X_test, y_reb, y_test, cv=5)
-    # print("")
+    print("Building XGBoost Model with Rebalanced KNN Upsampling")
+    xgboost_reb_model, xgboost_reb_test_mape = build_xgboost(X_reb, X_test, y_reb, y_test, cv=5)
+    print("")
 
     # print("Building AdaBoost Model with no Upsampling")
     # adaboost_model, adaboost_test_mape = build_adaboost(X_train, X_test, y_flat, y_test)
@@ -828,37 +828,37 @@ if __name__ == "__main__":
     # adaboost_reb_model, adaboost_reb_test_mape = build_adaboost(X_reb, X_test, y_reb, y_test)
     # print("")
 
-    print("Building XGBoost with Bootstrapping and no Oversampling")
-    xgboost_bootstrap_model, xgboost_bootstrap_mape = build_xgboost_with_bootstrap(X_train, X_test, y_flat, y_test)
-    print("")
+    # print("Building XGBoost with Bootstrapping and no Oversampling")
+    # xgboost_bootstrap_model, xgboost_bootstrap_mape = build_xgboost_with_bootstrap(X_train, X_test, y_flat, y_test)
+    # print("")
 
-    print("Building XGBoost with Bootstrapping and Simple Duplication")
-    xgboost_bootstrap_sim_model, xgboost_bootstrap_sim_mape = build_xgboost_with_bootstrap(X_sim, X_test, y_sim, y_test)
-    print("")
+    # print("Building XGBoost with Bootstrapping and Simple Duplication")
+    # xgboost_bootstrap_sim_model, xgboost_bootstrap_sim_mape = build_xgboost_with_bootstrap(X_sim, X_test, y_sim, y_test)
+    # print("")
 
-    print("Building XGBoost with Bootstrapping and KNN Oversampling")
-    xgboost_bootstrap_knn_model, xgboost_bootstrap_knn_mape = build_xgboost_with_bootstrap(X_knn, X_test, y_knn, y_test)
-    print("")
+    # print("Building XGBoost with Bootstrapping and KNN Oversampling")
+    # xgboost_bootstrap_knn_model, xgboost_bootstrap_knn_mape = build_xgboost_with_bootstrap(X_knn, X_test, y_knn, y_test)
+    # print("")
 
     print("Building XGBoost with Bootstrapping and SMO")
     xgboost_bootstrap_reb_model, xgboost_bootstrap_reb_mape = build_xgboost_with_bootstrap(X_reb, X_test, y_reb, y_test)
     print("")
 
-    print("Building AdaBoost with Bootstrapping and no Oversampling")
-    adaboost_bootstrap_model, adaboost_bootstrap_mape = build_adaboost_with_bootstrap(X_train, X_test, y_flat, y_test)
-    print("")
+    # print("Building AdaBoost with Bootstrapping and no Oversampling")
+    # adaboost_bootstrap_model, adaboost_bootstrap_mape = build_adaboost_with_bootstrap(X_train, X_test, y_flat, y_test)
+    # print("")
 
-    print("Building AdaBoost with Bootstrapping and Simple Duplication")
-    adaboost_bootstrap_sim_model, adaboost_bootstrap_sim_mape = build_adaboost_with_bootstrap(X_sim, X_test, y_sim, y_test)
-    print("")
+    # print("Building AdaBoost with Bootstrapping and Simple Duplication")
+    # adaboost_bootstrap_sim_model, adaboost_bootstrap_sim_mape = build_adaboost_with_bootstrap(X_sim, X_test, y_sim, y_test)
+    # print("")
 
-    print("Building AdaBoost with Bootstrapping and KNN Oversampling")
-    adaboost_bootstrap_knn_model, adaboost_bootstrap_knn_mape = build_adaboost_with_bootstrap(X_knn, X_test, y_knn, y_test)
-    print("")
+    # print("Building AdaBoost with Bootstrapping and KNN Oversampling")
+    # adaboost_bootstrap_knn_model, adaboost_bootstrap_knn_mape = build_adaboost_with_bootstrap(X_knn, X_test, y_knn, y_test)
+    # print("")
 
-    print("Building AdaBoost with Bootstrapping and SMO")
-    adaboost_bootstrap_reb_model, adaboost_bootstrap_reb_mape = build_adaboost_with_bootstrap(X_reb, X_test, y_reb, y_test)
-    print("")
+    # print("Building AdaBoost with Bootstrapping and SMO")
+    # adaboost_bootstrap_reb_model, adaboost_bootstrap_reb_mape = build_adaboost_with_bootstrap(X_reb, X_test, y_reb, y_test)
+    # print("")
 
     # # Row is model type
     # summary = pd.DataFrame([[lr_test_mape, lr_sim_test_mape, lr_knn_test_mape, lr_reb_test_mape],
@@ -873,14 +873,14 @@ if __name__ == "__main__":
     # print(summary)
     # print("")
 
-    # if args.model == 0:
-    #     summary.to_excel('./Datasets/model_mape_qaly.xlsx', index=False, engine='openpyxl')
-    #     print("Results Saved")
-    #     models = [no_bootstrap_reb_model, bootstrap_reb_model, xgboost_reb_model, stacking_reb_model]
-    # else:
-    #     summary.to_excel('./Datasets/model_mape_hsc.xlsx', index=False, engine='openpyxl')
-    #     print("Results Saved")
-    #     models = [no_bootstrap_reb_model, bootstrap_reb_model, xgboost_reb_model, stacking_reb_model]
+    if args.model == 0:
+        # summary.to_excel('./Datasets/model_mape_qaly.xlsx', index=False, engine='openpyxl')
+        print("Results Saved")
+        models = [no_bootstrap_reb_model, bootstrap_reb_model, xgboost_reb_model, stacking_reb_model, xgboost_bootstrap_reb_model]
+    else:
+        # summary.to_excel('./Datasets/model_mape_hsc.xlsx', index=False, engine='openpyxl')
+        print("Results Saved")
+        models = [no_bootstrap_reb_model, bootstrap_reb_model, xgboost_reb_model, stacking_reb_model, xgboost_bootstrap_reb_model]
         
 
     # Generate all combinations (1 to 5 models)
@@ -899,10 +899,13 @@ if __name__ == "__main__":
     #     if current_mape < best_mape:
     #         best_mape = current_mape
     #         best_ensemble = all_combinations[i]
-    # print("Best Ensemble", best_ensemble)
+    # print("Best Ensemble")
+    # for i in range(len(best_ensemble)):
+    #     print(best_ensemble[i])
     # print("Ensemble MAPE", best_mape)
         
-
+    ensemble_mape = ensemble(models, X_test, y_test)
+    print("Ensemble MAPE:", ensemble_mape)
 
     
     if args.variance:
